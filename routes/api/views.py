@@ -11,11 +11,14 @@ routes/tests/test_api_route_plan.py.
 """
 from __future__ import annotations
 
+import logging
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from routes.api.serializers import RoutePlanRequestSerializer, serialize_route_plan_result
+from routes.domain.fuel_optimizer import InvalidOptimizerInputError
 from routes.services.exceptions import (
     GeocodingProviderError,
     RouteNotFoundError,
@@ -26,6 +29,8 @@ from routes.services.route_plan_exceptions import (
     RoutePlanLocationNotFoundError,
     RoutePlanLocationOutOfScopeError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RoutePlanView(APIView):
@@ -90,6 +95,31 @@ class RoutePlanView(APIView):
                     "code": "routing_provider_error",
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except InvalidOptimizerInputError:
+            # This is NOT a client error — the client only ever supplies
+            # start/destination, never vehicle config or station data, so a
+            # rejected optimizer input reflects a problem with OUR data or
+            # configuration (e.g. a persisted station coordinate whose
+            # derived travel_distance_miles is genuinely inconsistent with
+            # the route), not something the caller did wrong. It is
+            # therefore a controlled 500, not a 4xx — logged with the full
+            # traceback server-side (for engineers to investigate) but
+            # never exposed to the client, which only ever sees a generic,
+            # stable error code.
+            logger.exception(
+                "Optimizer rejected its inputs while planning a route "
+                "(start=%r, destination=%r) — likely a data/config issue, "
+                "not a client error",
+                start,
+                destination,
+            )
+            return Response(
+                {
+                    "detail": "Unable to compute a fuel plan due to an internal error.",
+                    "code": "internal_error",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         if not result.fuel_plan.feasible:

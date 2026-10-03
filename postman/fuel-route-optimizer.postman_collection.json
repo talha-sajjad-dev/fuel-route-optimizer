@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Fuel Route Optimizer",
-    "description": "POST /api/v1/routes/plan — given a start and destination, returns the route and the minimum-cost fuel stops a 10 MPG / 500-mile-range / 50-gallon-tank vehicle needs. Station prices/identities are real rows from the supplied CSV, enriched with a demo coordinate fixture along the Oklahoma City -> Albuquerque I-40 corridor (see README's coordinate-quality disclaimer). Set the `base_url` collection variable (default http://localhost:8000) before running.",
+    "description": "POST /api/v1/routes/plan — given a start and destination, returns the route and the minimum-cost fuel stops a 10 MPG / 500-mile-range / 50-gallon-tank vehicle needs. Uses the real supplied CSV data enriched along the Oklahoma City -> Albuquerque I-40 demo corridor (Phase 8). Set the `base_url` collection variable (default http://localhost:8000) before running.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

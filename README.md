@@ -90,11 +90,9 @@ Live-geocoding all of them against free Nominatim (rate-limited to 1
 req/sec) would take hours and isn't something normal setup should ever
 require. Instead:
 
-- `data/station_coordinates.csv` is a small, **committed demo coordinate
-  fixture** — covering 87 real CSV stations along I-40 through OK/TX/NM,
-  generated once offline and checked into the repo like any other fixture.
-  It exists to make the demo reproducible, not as a claim of production-grade
-  station geolocation (see the disclaimer below).
+- `data/station_coordinates.csv` is a small, **committed, pre-computed
+  fixture** — 87 real stations along I-40 through OK/TX/NM, generated once
+  offline and checked into the repo like any other fixture.
 - The normal setup path (`enrich_station_coordinates --provider file`,
   above) only ever reads this file — zero network calls.
 - Building/extending the fixture is a separate, explicit, rate-limited,

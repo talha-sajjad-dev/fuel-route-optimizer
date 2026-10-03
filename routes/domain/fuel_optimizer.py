@@ -61,11 +61,27 @@ from routes.domain.types import FuelPlan, FuelStop, StationCandidate, VehiclePro
 # Tolerance for floating-point distance/fuel comparisons. Physical distance
 # and fuel quantities are plain floats per the agreed design (Decimal is
 # reserved for money); this tolerance absorbs floating-point noise from
-# upstream geospatial projection and repeated arithmetic, not the optimizer's
-# own compounding error (each stop's arithmetic is exact given its inputs).
-# 1e-6 miles is ~5mm and 1e-6 gallons is a fraction of a drop — both are far
-# below any value that could change which station is chosen.
+# the optimizer's OWN arithmetic (each stop's math is otherwise exact given
+# its inputs). 1e-6 miles is ~1.6mm and 1e-6 gallons is a fraction of a
+# drop — both are far below any value that could change which station is
+# chosen.
 TOLERANCE = 1e-6
+
+# A station's travel_distance_miles and the route's own route_distance_miles
+# are computed by two INDEPENDENT paths that are expected to agree but are
+# not the same calculation: the former is OSRM's per-segment road distance
+# plus a local Shapely/pyproj interpolation within one polyline segment
+# (routes/services/geospatial.py); the latter is OSRM's single reported
+# total for the whole route. Chaining WGS84<->EPSG:5070 transforms and
+# per-segment interpolation accumulates more floating-point error than a
+# single arithmetic comparison does — observed in production as a station
+# essentially AT the route's endpoint computing to ~1.05e-5 miles (~1.7cm)
+# *beyond* route_distance_miles, which TOLERANCE (1e-6 mi, ~1.6mm) is too
+# tight to absorb. DISTANCE_EPSILON_MILES is a separate, explicitly larger
+# tolerance for exactly this cross-system comparison — still three orders
+# of magnitude below any gap (e.g. 0.1 mile) that should genuinely be
+# rejected as an invalid input, so it cannot mask a real data problem.
+DISTANCE_EPSILON_MILES = 1e-4
 
 
 class InvalidOptimizerInputError(ValueError):
@@ -403,7 +419,7 @@ def _validate_inputs(
                 f"station {c.station_id} has a negative travel_distance_miles: "
                 f"{c.travel_distance_miles}"
             )
-        if c.travel_distance_miles > route_distance_miles + TOLERANCE:
+        if c.travel_distance_miles > route_distance_miles + DISTANCE_EPSILON_MILES:
             raise InvalidOptimizerInputError(
                 f"station {c.station_id} travel_distance_miles "
                 f"({c.travel_distance_miles}) exceeds route_distance_miles "

@@ -489,3 +489,63 @@ def test_optimizer_receives_travel_distance_via_full_stack(client, mocked_http):
     # the station (at the midpoint vertex) should be positioned at the
     # authoritative 300mi mark, not an uncalibrated geometric midpoint of 750
     assert body["stops"][0]["route_position_miles"] == pytest.approx(300.0, rel=0.05)
+
+
+# ---------------------------------------------------------------------
+# Regression: production reported a real request crashing with a raw
+# Django DEBUG traceback (InvalidOptimizerInputError was never caught by
+# the view). Verifies the API now returns a clean, structured 500 instead.
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_optimizer_input_error_returns_clean_500_not_a_traceback(client):
+    from routes.domain.fuel_optimizer import InvalidOptimizerInputError
+
+    mock_service = MagicMock()
+    mock_service.plan.side_effect = InvalidOptimizerInputError(
+        "station 380 travel_distance_miles (544.7709855445179) exceeds "
+        "route_distance_miles (544.7709750059652)"
+    )
+
+    with patch("routes.api.views.build_route_plan_service", return_value=mock_service):
+        response = client.post(URL, ADDRESS_PAYLOAD, format="json")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "internal_error"
+    assert "detail" in body
+
+    # the raw exception message/internal details must never reach the client
+    body_text = response.content.decode().lower()
+    assert "invalidoptimizerinputerror" not in body_text
+    assert "544.77" not in body_text
+    assert "traceback" not in body_text
+    assert "<html" not in body_text  # not Django's DEBUG HTML page
+
+
+@pytest.mark.django_db
+def test_unhandled_exception_with_debug_false_does_not_leak_traceback(settings):
+    """A production-like config guard: even an exception we didn't
+    anticipate must not render Django's DEBUG HTML traceback page when
+    DEBUG=False (the config real deployments should run with).
+
+    Uses raise_request_exception=False: Django's test client re-raises
+    server exceptions by default as a debugging convenience, which would
+    mask the actual HTTP response a real (production, DEBUG=False) client
+    receives — exactly the behavior this test needs to observe.
+    """
+    settings.DEBUG = False
+    no_raise_client = APIClient(raise_request_exception=False)
+
+    mock_service = MagicMock()
+    mock_service.plan.side_effect = RuntimeError("completely unexpected failure")
+
+    with patch("routes.api.views.build_route_plan_service", return_value=mock_service):
+        response = no_raise_client.post(URL, ADDRESS_PAYLOAD, format="json")
+
+    assert response.status_code == 500
+    body_text = response.content.decode().lower()
+    assert "runtimeerror" not in body_text
+    assert "traceback" not in body_text
+    assert "<html" not in body_text or "server error" in body_text

@@ -468,3 +468,43 @@ def test_total_fuel_consumed_matches_travel_distance_not_route_position():
     # after reaching the station (50-40=10) is insufficient.
     assert stop.fuel_before_gallons == pytest.approx(10.0)
     assert stop.fuel_purchased_gallons == pytest.approx(20.0)  # need 30 total, have 10
+
+
+# ---------------------------------------------------------------------
+# Regression: production reported a real request crashing with
+#   InvalidOptimizerInputError: station 380 travel_distance_miles
+#   (544.7709855445179) exceeds route_distance_miles (544.7709750059652)
+# A station essentially AT the route's endpoint, computed via the
+# geospatial service's independent interpolation path, can land ~1e-5
+# miles beyond OSRM's own reported total purely from floating-point/
+# projection round-trip noise. The old TOLERANCE (1e-6 mi) was too tight
+# to absorb this; DISTANCE_EPSILON_MILES (1e-4 mi) is the fix.
+# ---------------------------------------------------------------------
+
+
+def test_station_exactly_at_route_end_is_accepted():
+    station = candidate(1, position=500.0, price="2.0", travel_distance=500.0)
+    plan = plan_fuel_stops(DEFAULT_VEHICLE, 500.0, [station])
+    assert plan.feasible
+
+
+def test_station_tiny_float_amount_beyond_route_is_accepted():
+    # Reproduces the exact magnitude observed in production (~1.05e-5 mi
+    # delta between a station's travel_distance_miles and the route's own
+    # route_distance_miles), scaled to fit within max_range_miles (500) so
+    # the scenario is feasible for the right reason — this test is about
+    # the validation tolerance, not about range feasibility.
+    delta = 544.7709855445179 - 544.7709750059652  # ~1.0539e-5
+    route_distance = 500.0 - delta
+    travel_distance = 500.0
+    station = candidate(1, position=travel_distance, price="2.0", travel_distance=travel_distance)
+    plan = plan_fuel_stops(DEFAULT_VEHICLE, route_distance, [station])
+    assert plan.feasible
+
+
+def test_station_genuinely_beyond_route_is_still_rejected():
+    # 0.1 miles is three orders of magnitude larger than DISTANCE_EPSILON_MILES
+    # (1e-4) — a real data error, not floating-point noise, and must still raise.
+    station = candidate(1, position=500.1, price="2.0", travel_distance=500.1)
+    with pytest.raises(InvalidOptimizerInputError):
+        plan_fuel_stops(DEFAULT_VEHICLE, 500.0, [station])
