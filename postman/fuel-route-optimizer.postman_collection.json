@@ -1,0 +1,64 @@
+{
+  "info": {
+    "name": "Fuel Route Optimizer",
+    "description": "POST /api/v1/routes/plan — given a start and destination, returns the route and the minimum-cost fuel stops a 10 MPG / 500-mile-range / 50-gallon-tank vehicle needs. Station prices/identities are real rows from the supplied CSV, enriched with a demo coordinate fixture along the Oklahoma City -> Albuquerque I-40 corridor (see README's coordinate-quality disclaimer). Set the `base_url` collection variable (default http://localhost:8000) before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Coordinate/Coordinate — OKC to Albuquerque",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"latitude\": 35.4730, \"longitude\": -97.5171},\n  \"destination\": {\"latitude\": 35.0841, \"longitude\": -106.6510}\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/routes/plan", "host": ["{{base_url}}"], "path": ["api", "v1", "routes", "plan"] },
+        "description": "Both locations supplied as coordinates -> zero geocoding calls, exactly one routing call on a cache miss. Expected: 200 OK. route.distance_miles ~544.7 (a real ~545-mile I-40 drive, which exceeds the 500-mile max range), fuel.feasible=true, exactly one real fuel stop from the supplied CSV (a real station near Amarillo, TX), fuel.total_gallons_purchased and fuel.total_cost both > 0."
+      }
+    },
+    {
+      "name": "2. Address/Address — OKC to Albuquerque",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Oklahoma City, OK\",\n  \"destination\": \"Albuquerque, NM\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/routes/plan", "host": ["{{base_url}}"], "path": ["api", "v1", "routes", "plan"] },
+        "description": "Both locations supplied as place-name strings -> up to 2 geocoding calls (one per location, each cached independently) and exactly one routing call on a cache miss. Expected: 200 OK, with a response shape identical to Request 1 — geocoding is only ever used to resolve start/destination, never to locate fuel stations."
+      }
+    },
+    {
+      "name": "3. Validation failure — missing destination",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Oklahoma City, OK\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/routes/plan", "host": ["{{base_url}}"], "path": ["api", "v1", "routes", "plan"] },
+        "description": "Expected: 400 Bad Request, body `{\"destination\": [\"This field is required.\"]}`. Request validation never reaches RoutePlanService, the providers, or the database — it's rejected by the serializer before any orchestration begins. Try also: {\"start\": \"\", \"destination\": \"Albuquerque, NM\"} (blank string) or {\"start\": {\"latitude\": 91, \"longitude\": -97}, \"destination\": \"Albuquerque, NM\"} (latitude out of [-90, 90]) for the same 400 behavior."
+      }
+    },
+    {
+      "name": "4. Cached repeat — resend Request 1",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"latitude\": 35.4730, \"longitude\": -97.5171},\n  \"destination\": {\"latitude\": 35.0841, \"longitude\": -106.6510}\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/routes/plan", "host": ["{{base_url}}"], "path": ["api", "v1", "routes", "plan"] },
+        "description": "Identical body to Request 1 — send this AFTER Request 1 has already succeeded once. Expected: 200 OK with the exact same route/fuel/stops as Request 1, but served from the DB-backed RouteCacheEntry — no second OSRM call is made. Observable from the server side via a noticeably faster response and an unchanged RouteCacheEntry row count; not distinguishable from the HTTP response alone, which is the point — caching is transparent to the client."
+      }
+    }
+  ]
+}
