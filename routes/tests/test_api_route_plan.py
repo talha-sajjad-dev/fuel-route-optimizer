@@ -524,6 +524,92 @@ def test_optimizer_input_error_returns_clean_500_not_a_traceback(client):
     assert "<html" not in body_text  # not Django's DEBUG HTML page
 
 
+# ---- vehicle override -------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_vehicle_override_reflected_in_response(client, mocked_http):
+    _, mock_route = mocked_http
+    mock_route.return_value = make_response(200, json_body=osrm_body(300.0))
+
+    payload = {
+        "start": {"latitude": 41.8781, "longitude": -87.6298},
+        "destination": {"latitude": 42.3314, "longitude": -83.0458},
+        "vehicle": {"mpg": 28.0, "tank_capacity_gallons": 14.0},
+    }
+    response = client.post(URL, payload, format="json")
+
+    assert response.status_code == 200
+    v = response.json()["vehicle"]
+    assert v["mpg"] == pytest.approx(28.0)
+    assert v["tank_capacity_gallons"] == pytest.approx(14.0)
+    # max_range_miles must be derived from the supplied values (28 * 14 = 392),
+    # not from the default settings vehicle.
+    assert v["max_range_miles"] == pytest.approx(28.0 * 14.0)
+
+
+@pytest.mark.django_db
+def test_missing_vehicle_falls_back_to_settings_default(client, mocked_http):
+    """Omitting 'vehicle' must not break anything — the service falls back to
+    the vehicle profile wired in Django settings (the existing behaviour)."""
+    _, mock_route = mocked_http
+    mock_route.return_value = make_response(200, json_body=osrm_body(300.0))
+
+    payload = {
+        "start": {"latitude": 41.8781, "longitude": -87.6298},
+        "destination": {"latitude": 42.3314, "longitude": -83.0458},
+    }
+    response = client.post(URL, payload, format="json")
+
+    assert response.status_code == 200
+    assert response.json()["fuel"]["feasible"] is True
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "bad_vehicle",
+    [
+        {"mpg": 0, "tank_capacity_gallons": 14.0},       # mpg below minimum
+        {"mpg": -5.0, "tank_capacity_gallons": 14.0},    # negative mpg
+        {"mpg": 200.0, "tank_capacity_gallons": 14.0},   # mpg above maximum
+        {"mpg": 28.0, "tank_capacity_gallons": 0},       # tank below minimum
+        {"mpg": 28.0, "tank_capacity_gallons": 300.0},   # tank above maximum
+        {"mpg": 28.0},                                    # missing tank
+        {"tank_capacity_gallons": 14.0},                  # missing mpg
+        {"mpg": "fast", "tank_capacity_gallons": 14.0},  # non-numeric mpg
+    ],
+)
+def test_invalid_vehicle_values_return_400(client, bad_vehicle):
+    payload = {
+        "start": {"latitude": 41.8781, "longitude": -87.6298},
+        "destination": {"latitude": 42.3314, "longitude": -83.0458},
+        "vehicle": bad_vehicle,
+    }
+    response = client.post(URL, payload, format="json")
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_vehicle_override_with_short_range_causes_infeasible_route(client, mocked_http):
+    """A custom vehicle with a very small tank should make an otherwise
+    feasible route infeasible when no stations are present — proving the
+    override actually reaches the optimizer rather than being silently ignored."""
+    _, mock_route = mocked_http
+    # 300-mile route; default vehicle handles it fine (max_range 500).
+    # A 10-gallon tank at 10 mpg = 100-mile max range — should be infeasible.
+    mock_route.return_value = make_response(200, json_body=osrm_body(300.0))
+
+    payload = {
+        "start": {"latitude": 41.8781, "longitude": -87.6298},
+        "destination": {"latitude": 42.3314, "longitude": -83.0458},
+        "vehicle": {"mpg": 10.0, "tank_capacity_gallons": 10.0},
+    }
+    response = client.post(URL, payload, format="json")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "route_infeasible"
+
+
 @pytest.mark.django_db
 def test_unhandled_exception_with_debug_false_does_not_leak_traceback(settings):
     """A production-like config guard: even an exception we didn't
