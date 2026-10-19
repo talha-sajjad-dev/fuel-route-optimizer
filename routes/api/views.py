@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 
 from routes.api.serializers import RoutePlanRequestSerializer, serialize_route_plan_result
 from routes.domain.fuel_optimizer import InvalidOptimizerInputError
+from routes.domain.types import VehicleProfile
 from routes.services.exceptions import (
     GeocodingProviderError,
     RouteNotFoundError,
@@ -40,11 +41,23 @@ class RoutePlanView(APIView):
 
         start = serializer.validated_data["start"]
         destination = serializer.validated_data["destination"]
+        vehicle_data = serializer.validated_data.get("vehicle")
 
         service = build_route_plan_service()
 
+        vehicle_override = None
+        if vehicle_data:
+            tank = vehicle_data["tank_capacity_gallons"]
+            mpg = vehicle_data["mpg"]
+            vehicle_override = VehicleProfile(
+                mpg=mpg,
+                tank_capacity_gallons=tank,
+                max_range_miles=mpg * tank,
+                starting_fuel_gallons=tank,
+            )
+
         try:
-            result = service.plan(start, destination)
+            result = service.plan(start, destination, vehicle=vehicle_override)
         except RoutePlanLocationNotFoundError as exc:
             return Response(
                 {

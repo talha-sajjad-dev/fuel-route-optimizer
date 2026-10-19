@@ -72,9 +72,23 @@ class LocationField(serializers.Field):
         raise NotImplementedError
 
 
+class VehicleInputSerializer(serializers.Serializer):
+    """Optional per-request vehicle override.
+
+    Only two fields are accepted. `max_range_miles` is intentionally excluded
+    from the API: it is physically derived from mpg × tank_capacity_gallons, so
+    accepting it as an independent input would let callers supply internally
+    inconsistent vehicle specs.
+    """
+
+    mpg = serializers.FloatField(min_value=1.0, max_value=150.0)
+    tank_capacity_gallons = serializers.FloatField(min_value=1.0, max_value=200.0)
+
+
 class RoutePlanRequestSerializer(serializers.Serializer):
     start = LocationField()
     destination = LocationField()
+    vehicle = VehicleInputSerializer(required=False)
 
 
 def _format_money(value: Decimal) -> str:

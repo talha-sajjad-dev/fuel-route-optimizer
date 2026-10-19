@@ -71,7 +71,14 @@ class RoutePlanService:
         self._geospatial_service = geospatial_service
         self._vehicle = vehicle
 
-    def plan(self, start: "str | Coordinates", destination: "str | Coordinates") -> RoutePlanResult:
+    def plan(
+        self,
+        start: "str | Coordinates",
+        destination: "str | Coordinates",
+        vehicle: "VehicleProfile | None" = None,
+    ) -> RoutePlanResult:
+        active_vehicle = vehicle if vehicle is not None else self._vehicle
+
         origin_coords = self._resolve_location(start, field="start")
         destination_coords = self._resolve_location(destination, field="destination")
 
@@ -86,9 +93,9 @@ class RoutePlanService:
 
         # route.distance_miles (OSRM's authoritative figure) feeds the
         # optimizer directly — never a value derived from projected geometry.
-        fuel_plan = plan_fuel_stops(self._vehicle, route.distance_miles, candidates)
+        fuel_plan = plan_fuel_stops(active_vehicle, route.distance_miles, candidates)
 
-        return RoutePlanResult(route=route, vehicle=self._vehicle, fuel_plan=fuel_plan)
+        return RoutePlanResult(route=route, vehicle=active_vehicle, fuel_plan=fuel_plan)
 
     def _resolve_location(self, location: "str | Coordinates", field: str) -> Coordinates:
         if isinstance(location, Coordinates):
